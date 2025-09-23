@@ -1,6 +1,7 @@
 #include<stdio.h>
 #include <stdlib.h>
 
+
 typedef int Status;
 typedef int ElemType;
 #define OK 1
