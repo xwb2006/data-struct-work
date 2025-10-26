@@ -1,0 +1,479 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+
+//--------------------------------------------------------------------
+// 1. Data Structure Definitions
+//--------------------------------------------------------------------
+
+typedef enum { ELEMENT_NODE, TEXT_NODE } NodeType;
+
+typedef struct HtmlNode {
+    NodeType type;
+    char* tagName;
+    char* textContent;
+    struct HtmlNode* parent;
+    struct HtmlNode** children;
+    int childCount;
+    int capacity;
+    int startPos;
+    int endPos;
+} HtmlNode;
+
+typedef struct {
+    HtmlNode** items;
+    int top;
+    int capacity;
+} Stack;
+
+typedef struct {
+    HtmlNode** nodes;
+    int count;
+} NodeList;
+
+//--------------------------------------------------------------------
+// 2. Global Variables
+//--------------------------------------------------------------------
+char* G_htmlContent = NULL;
+HtmlNode* G_rootNode = NULL;
+int G_parsingError = 0;
+
+//--------------------------------------------------------------------
+// 3. Function Prototypes
+//--------------------------------------------------------------------
+void CheckHTML();
+void OutHTML(const char* path);
+void Text(const char* path);
+void buildDOM();
+int isVoidElement(const char* tag);
+int isBlockTag(const char* tag);
+int isWhitespace(const char* str);
+void toLowerStr(char* str);
+char* strndup_custom(const char* s, size_t n);
+HtmlNode* createNode(NodeType type);
+void addChild(HtmlNode* parent, HtmlNode* child);
+void freeTree(HtmlNode* node);
+Stack* createStack(int capacity);
+void push(Stack* s, HtmlNode* node);
+HtmlNode* pop(Stack* s);
+HtmlNode* peek(Stack* s);
+void freeStack(Stack* s);
+
+//--------------------------------------------------------------------
+// 4. Main Function
+//--------------------------------------------------------------------
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        printf("Usage: %s <filename.html>\n", argv[0]);
+        return 1;
+    }
+
+    FILE* file = fopen(argv[1], "rb");
+    if (!file) {
+        printf("Error: Cannot open file '%s'\n", argv[1]);
+        return 1;
+    }
+
+    fseek(file, 0, SEEK_END);
+    long fileSize = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    G_htmlContent = (char*)malloc(fileSize + 1);
+    if (!G_htmlContent) {
+        printf("Error: Cannot allocate memory for file content.\n");
+        fclose(file);
+        return 1;
+    }
+    fread(G_htmlContent, 1, fileSize, file);
+    G_htmlContent[fileSize] = '\0';
+    fclose(file);
+    
+    buildDOM();
+
+    char command[1024];
+    while (1) {
+        printf("\nEnter command (CheckHTML, OutHTML(/path), Text(/path), Exit): ");
+        if (fgets(command, sizeof(command), stdin) == NULL) {
+            break;
+        }
+        
+        command[strcspn(command, "\r\n")] = 0;
+        
+        if (strcmp(command, "Exit") == 0) {
+            break;
+        }
+
+        char path[1024] = {0};
+        if (strcmp(command, "CheckHTML") == 0) {
+            CheckHTML();
+        } else if (sscanf(command, "OutHTML(%[^)])", path) == 1) {
+            OutHTML(path);
+        } else if (sscanf(command, "Text(%[^)])", path) == 1) {
+            Text(path);
+        } else {
+            printf("Invalid command.\n");
+        }
+    }
+    
+    freeTree(G_rootNode);
+    free(G_htmlContent);
+    return 0;
+}
+
+//--------------------------------------------------------------------
+// 5. Core Function Implementations
+//--------------------------------------------------------------------
+
+void buildDOM() {
+    G_rootNode = createNode(ELEMENT_NODE);
+    G_rootNode->tagName = strdup("document_root");
+
+    Stack* stack = createStack(256);
+    push(stack, G_rootNode);
+
+    char* ptr = G_htmlContent;
+
+    while (*ptr) {
+        char* start = ptr;
+        
+        while (*ptr && *ptr != '<') {
+            ptr++;
+        }
+
+        if (ptr > start) {
+            char* text = strndup_custom(start, ptr - start);
+            if (!isWhitespace(text)) {
+                 HtmlNode* textNode = createNode(TEXT_NODE);
+                 textNode->textContent = text;
+                 addChild(peek(stack), textNode);
+            } else {
+                free(text);
+            }
+        }
+        
+        if (*ptr == '\0') break;
+
+        int tagStartPos = ptr - G_htmlContent;
+        ptr++;
+
+        if (*ptr == '!') {
+            if (strncmp(ptr, "!--", 3) == 0) {
+                ptr = strstr(ptr, "-->");
+                if (ptr) ptr += 3; else break;
+            } else {
+                ptr = strchr(ptr, '>');
+                if (ptr) ptr++; else break;
+            }
+            continue;
+        }
+
+        if (*ptr == '/') {
+            ptr++;
+            char* tagNameStart = ptr;
+            while (*ptr && *ptr != '>') ptr++;
+            
+            char tempTag[100];
+            size_t tagLen = ptr - tagNameStart;
+            if (tagLen > 99) tagLen = 99;
+            strncpy(tempTag, tagNameStart, tagLen);
+            tempTag[tagLen] = '\0';
+            toLowerStr(tempTag);
+            
+            HtmlNode* topNode = peek(stack);
+            if (topNode && topNode->tagName && strcmp(tempTag, topNode->tagName) == 0) {
+                pop(stack)->endPos = (ptr - G_htmlContent) + 1;
+            } else {
+                if (topNode && topNode->tagName) {
+                    printf("CheckHTML Error: Mismatched closing tag </%s>, expected </%s>\n", tempTag, topNode->tagName);
+                } else {
+                     printf("CheckHTML Error: Unexpected closing tag </%s>\n", tempTag);
+                }
+                G_parsingError = 1;
+            }
+            if (*ptr == '>') ptr++;
+        } 
+        else {
+            char* tagNameStart = ptr;
+            while (*ptr && !isspace((unsigned char)*ptr) && *ptr != '>' && *ptr != '/') {
+                ptr++;
+            }
+            
+            char tagName[100];
+            size_t tagLen = ptr - tagNameStart;
+            if (tagLen > 99) tagLen = 99;
+            strncpy(tagName, tagNameStart, tagLen);
+            tagName[tagLen] = '\0';
+            toLowerStr(tagName);
+            
+            if (strcmp(tagName, "script") == 0 || strcmp(tagName, "style") == 0) {
+                 char endTag[110];
+                 sprintf(endTag, "</%s>", tagName);
+                 ptr = strstr(ptr, endTag);
+                 if (ptr) ptr += strlen(endTag); else break;
+                 continue;
+            }
+            
+            // --- START: CORRECTED SELF-CLOSING TAG LOGIC ---
+            char* tagEnd = ptr;
+            while (*tagEnd && *tagEnd != '>') {
+                tagEnd++;
+            }
+
+            int isSelfClosing = 0;
+            // A tag is self-closing if a '/' exists right before the '>'
+            if (tagEnd > ptr && *(tagEnd - 1) == '/') {
+                isSelfClosing = 1;
+            }
+            
+            ptr = tagEnd; // Move pointer to the '>'
+            if (*ptr == '>') ptr++; // And then move past it
+            // --- END: CORRECTED SELF-CLOSING TAG LOGIC ---
+
+            HtmlNode* newNode = createNode(ELEMENT_NODE);
+            newNode->tagName = strdup(tagName);
+            newNode->startPos = tagStartPos;
+            newNode->endPos = ptr - G_htmlContent;
+            
+            addChild(peek(stack), newNode);
+            
+            if (!isSelfClosing && !isVoidElement(newNode->tagName)) {
+                push(stack, newNode);
+            }
+        }
+    }
+
+    if (stack->top > 0) {
+        printf("CheckHTML Error: Unclosed tag <%s>\n", peek(stack)->tagName);
+        G_parsingError = 1;
+    }
+    
+    freeStack(stack);
+}
+
+void CheckHTML() {
+    if (G_parsingError) {
+        printf("CheckHTML: HTML is invalid.\n");
+    } else {
+        printf("CheckHTML: HTML is valid.\n");
+    }
+}
+
+void findNodesRecursive(HtmlNode* node, char** pathParts, int depth, int pathLen, NodeList* result) {
+    if (!node || node->type != ELEMENT_NODE) return;
+    
+    if (strcmp(node->tagName, pathParts[depth]) == 0) {
+        if (depth == pathLen - 1) {
+            result->nodes = (HtmlNode**)realloc(result->nodes, sizeof(HtmlNode*) * (result->count + 1));
+            result->nodes[result->count++] = node;
+        } else if (depth < pathLen - 1) {
+            for (int i = 0; i < node->childCount; ++i) {
+                findNodesRecursive(node->children[i], pathParts, depth + 1, pathLen, result);
+            }
+        }
+    }
+}
+
+NodeList* findNodesByPath(const char* path) {
+    char** pathParts = NULL;
+    int pathLen = 0;
+    char* pathCopy = strdup(path);
+    char* token = strtok(pathCopy, "/");
+    while(token) {
+        pathParts = (char**)realloc(pathParts, sizeof(char*) * (pathLen + 1));
+        pathParts[pathLen] = strdup(token);
+        toLowerStr(pathParts[pathLen]);
+        pathLen++;
+        token = strtok(NULL, "/");
+    }
+    free(pathCopy);
+
+    NodeList* result = (NodeList*)calloc(1, sizeof(NodeList));
+    
+    if (pathLen > 0) {
+        for (int i = 0; i < G_rootNode->childCount; ++i) {
+             findNodesRecursive(G_rootNode->children[i], pathParts, 0, pathLen, result);
+        }
+    }
+    
+    for (int i = 0; i < pathLen; ++i) free(pathParts[i]);
+    free(pathParts);
+    
+    return result;
+}
+
+void OutHTML(const char* path) {
+    NodeList* result = findNodesByPath(path);
+    if(result->count == 0){
+        printf("OutHTML: No elements found for path '%s'\n", path);
+    }
+    for(int i = 0; i < result->count; ++i) {
+        HtmlNode* node = result->nodes[i];
+        if(node->startPos != -1 && node->endPos != -1 && node->endPos > node->startPos){
+            printf("%.*s\n", node->endPos - node->startPos, G_htmlContent + node->startPos);
+        }
+    }
+    free(result->nodes);
+    free(result);
+}
+
+void extractTextRecursive(HtmlNode* node, char* buffer, int* bufferLen, int capacity){
+    if(!node || *bufferLen >= capacity - 1) return;
+
+    if(node->type == TEXT_NODE && node->textContent){
+        char* text = node->textContent;
+        int inSpace = 0;
+        for(int i = 0; text[i] && *bufferLen < capacity - 1; ++i){
+            if(isspace((unsigned char)text[i])){
+                if(!inSpace){
+                    buffer[(*bufferLen)++] = ' ';
+                    inSpace = 1;
+                }
+            } else {
+                buffer[(*bufferLen)++] = text[i];
+                inSpace = 0;
+            }
+        }
+    } else if (node->type == ELEMENT_NODE){
+        for(int i=0; i < node->childCount; ++i){
+            extractTextRecursive(node->children[i], buffer, bufferLen, capacity);
+        }
+        if(isBlockTag(node->tagName)){
+            if(*bufferLen > 0 && *bufferLen < capacity - 1 && buffer[*bufferLen - 1] != '\n'){
+                buffer[(*bufferLen)++] = '\n';
+            }
+        }
+    }
+}
+
+void Text(const char* path){
+     NodeList* result = findNodesByPath(path);
+     if(result->count == 0){
+        printf("Text: No elements found for path '%s'\n", path);
+    }
+    for(int i = 0; i < result->count; ++i) {
+        int capacity = 1024 * 10;
+        char* buffer = (char*)calloc(capacity, sizeof(char));
+        int len = 0;
+        extractTextRecursive(result->nodes[i], buffer, &len, capacity);
+
+        while(len > 0 && isspace((unsigned char)buffer[len-1])){
+            len--;
+        }
+        buffer[len] = '\0';
+        
+        printf("%s\n", buffer);
+        free(buffer);
+    }
+    free(result->nodes);
+    free(result);
+}
+
+//--------------------------------------------------------------------
+// 6. Utility & DS Implementations
+//--------------------------------------------------------------------
+
+int isVoidElement(const char* tag) {
+    const char* voidTags[] = {
+        "area", "base", "br", "col", "embed", "hr", "img", "input",
+        "link", "meta", "param", "source", "track", "wbr", NULL
+    };
+    for (int i = 0; voidTags[i] != NULL; ++i) {
+        if (strcmp(tag, voidTags[i]) == 0) return 1;
+    }
+    return 0;
+}
+
+int isBlockTag(const char* tag) {
+    const char* blockTags[] = {
+        "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "div", 
+        "table", "tr", "form", "body", "html", NULL
+    };
+    for (int i = 0; blockTags[i] != NULL; ++i) {
+        if (strcmp(tag, blockTags[i]) == 0) return 1;
+    }
+    return 0;
+}
+
+char* strndup_custom(const char* s, size_t n) {
+    char* p = (char*)malloc(n + 1);
+    if (p) {
+        strncpy(p, s, n);
+        p[n] = '\0';
+    }
+    return p;
+}
+
+void toLowerStr(char* str) {
+    for (; *str; ++str) *str = tolower((unsigned char)*str);
+}
+
+int isWhitespace(const char* str) {
+    while (*str) {
+        if (!isspace((unsigned char)*str)) return 0;
+        str++;
+    }
+    return 1;
+}
+
+HtmlNode* createNode(NodeType type) {
+    HtmlNode* node = (HtmlNode*)calloc(1, sizeof(HtmlNode));
+    node->type = type;
+    return node;
+}
+
+void addChild(HtmlNode* parent, HtmlNode* child) {
+    if (parent->childCount >= parent->capacity) {
+        parent->capacity = (parent->capacity == 0) ? 8 : parent->capacity * 2;
+        parent->children = (HtmlNode**)realloc(parent->children, sizeof(HtmlNode*) * parent->capacity);
+    }
+    parent->children[parent->childCount++] = child;
+    child->parent = parent;
+}
+
+void freeTree(HtmlNode* node) {
+    if (!node) return;
+    for (int i = 0; i < node->childCount; ++i) {
+        freeTree(node->children[i]);
+    }
+    free(node->tagName);
+    free(node->textContent);
+    free(node->children);
+    free(node);
+}
+
+Stack* createStack(int capacity) {
+    Stack* s = (Stack*)malloc(sizeof(Stack));
+    s->items = (HtmlNode**)malloc(sizeof(HtmlNode*) * capacity);
+    s->top = -1;
+    s->capacity = capacity;
+    return s;
+}
+
+void push(Stack* s, HtmlNode* node) {
+    if (s->top < s->capacity - 1) {
+        s->items[++s->top] = node;
+    }
+}
+
+HtmlNode* pop(Stack* s) {
+    if (s->top > -1) {
+        return s->items[s->top--];
+    }
+    return NULL;
+}
+
+HtmlNode* peek(Stack* s) 
+{
+    if (s->top > -1) 
+    {
+        return s->items[s->top];
+    }
+    return NULL;
+}
+
+void freeStack(Stack* s) 
+{
+    free(s->items);
+    free(s);
+}
