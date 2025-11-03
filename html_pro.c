@@ -89,7 +89,7 @@ int main(int argc, char* argv[]) {
             break;
         }
         
-        command[strcspn(command, "\r\n")] = 0;
+        command[strcspn(command, "\r\n")] = 0; // 去除换行符
         
         if (strcmp(command, "Exit") == 0) {
             break;
@@ -347,8 +347,9 @@ void extractTextRecursive(HtmlNode* node, char* buffer, int* bufferLen, int capa
 }
 
 void Text(const char* path){
-     NodeList* result = findNodesByPath(path);
-     if(result->count == 0){
+    NodeList* result = findNodesByPath(path);
+    if(result->count == 0)
+    {
         printf("Text: No elements found for path '%s'\n", path);
     }
     for(int i = 0; i < result->count; ++i) {
