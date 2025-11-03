@@ -56,13 +56,13 @@ void freeStack(Stack* s);
 
 int main(int argc, char* argv[]) {
     if (argc != 2) {
-        printf("Usage: %s <filename.html>\n", argv[0]);
+        printf("使用错误\n", argv[0]);
         return 1;
     }
 
     FILE* file = fopen(argv[1], "rb");
     if (!file) {
-        printf("Error: Cannot open file '%s'\n", argv[1]);
+        printf("文件打不开\n", argv[1]);
         return 1;
     }
 
@@ -72,7 +72,7 @@ int main(int argc, char* argv[]) {
 
     G_htmlContent = (char*)malloc(fileSize + 1);
     if (!G_htmlContent) {
-        printf("Error: Cannot allocate memory for file content.\n");
+        printf("内容有问题\n");
         fclose(file);
         return 1;
     }
@@ -84,7 +84,7 @@ int main(int argc, char* argv[]) {
 
     char command[1024];
     while (1) {
-        printf("\nEnter command (CheckHTML, OutHTML(/path), Text(/path), Exit): ");
+        printf("\n输入指令: (CheckHTML, OutHTML(/path), Text(/path), Exit): ");
         if (fgets(command, sizeof(command), stdin) == NULL) {
             break;
         }
@@ -181,9 +181,9 @@ void buildDOM() {
                 pop(stack)->endPos = (ptr - G_htmlContent) + 1;
             } else {
                 if (topNode && topNode->tagName) {
-                    printf("CheckHTML Error: Mismatched closing tag </%s>, expected </%s>\n", tempTag, topNode->tagName);
+                    printf("CheckHTML Error: Mis closing tag </%s>, expected </%s>\n", tempTag, topNode->tagName);
                 } else {
-                     printf("CheckHTML Error: Unexpected closing tag </%s>\n", tempTag);
+                     printf("CheckHTML Error: Unknown closing tag </%s>\n", tempTag);
                 }
                 G_parsingError = 1;
             }

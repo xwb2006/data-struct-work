@@ -2,13 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include <curl/curl.h> // --- 新增 ---: 引入 libcurl
+#include <curl/curl.h> 
 
 // 定义储存结构
 typedef enum { ELEMENT_NODE, TEXT_NODE } NodeType;
 
 typedef struct HtmlNode {
-    // ... (原有结构体不变) ...
     NodeType type;
     char* tagName;
     char* textContent;
@@ -31,7 +30,7 @@ typedef struct {
     int count;
 } NodeList;
 
-// --- 新增 ---: 用于 libcurl 保存下载数据的结构体
+// libcurl 保存下载数据的结构体
 typedef struct {
     char* buffer;
     size_t size;
@@ -68,7 +67,6 @@ char* fetchHtmlFromUrl(const char* url);
 static size_t WriteMemoryCallback(void* contents, size_t size, size_t nmemb, void* userp);
 
 
-// --- 修改 ---: main 函数调整为支持 URL 和文件
 int main(int argc, char* argv[]) {
     if (argc != 2) {
         printf("Usage: %s <filename.html or https://example.com>\n", argv[0]); // --- 修改 ---: 更新用法提示
@@ -77,7 +75,7 @@ int main(int argc, char* argv[]) {
 
     const char* input = argv[1];
 
-    // --- 修改 ---: 检查输入是 URL 还是文件
+    // 检查输入是 URL 还是文件
     if (strncmp(input, "http://", 7) == 0 || strncmp(input, "https://", 8) == 0) {
         printf("Fetching from URL: %s\n", input);
         G_htmlContent = fetchHtmlFromUrl(input);
@@ -92,7 +90,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
-    // --- 原有逻辑 ---
     buildDOM();
 
     char command[1024];
@@ -144,7 +141,7 @@ static size_t WriteMemoryCallback(void* contents, size_t size, size_t nmemb, voi
     return realsize;
 }
 
-// --- 新增 ---: 从 URL 获取 HTML 内容的函数
+// 从 URL 获取 HTML 内容的函数！！！！
 char* fetchHtmlFromUrl(const char* url) {
     CURL* curl;
     CURLcode res;
@@ -181,7 +178,7 @@ char* fetchHtmlFromUrl(const char* url) {
     return chunk.buffer; // 返回下载到的完整内容
 }
 
-// --- 新增 ---: 从文件读取 HTML 内容的函数 (从原 main 函数中提取)
+// 从文件读取 HTML 内容的函数
 char* readHtmlFromFile(const char* filename) {
     FILE* file = fopen(filename, "rb");
     if (!file) {
@@ -209,7 +206,6 @@ char* readHtmlFromFile(const char* filename) {
 
 // 具体实现
 void buildDOM() {
-    // ... (原有函数不变) ...
     // 初始化根节点
     G_rootNode = createNode(ELEMENT_NODE);
     G_rootNode->tagName = strdup("document_root");
@@ -348,7 +344,6 @@ void buildDOM() {
 }
 
 void CheckHTML() {
-    // ... (原有函数不变) ...
     if (G_parsingError) {
         printf("CheckHTML: HTML is invalid.\n");
     } else {
@@ -357,7 +352,6 @@ void CheckHTML() {
 }
 
 void findNodesRecursive(HtmlNode* node, char** pathParts, int depth, int pathLen, NodeList* result) {
-    // ... (原有函数不变) ...
     if (!node || node->type != ELEMENT_NODE) return;
     
     if (strcmp(node->tagName, pathParts[depth]) == 0) {
@@ -373,7 +367,6 @@ void findNodesRecursive(HtmlNode* node, char** pathParts, int depth, int pathLen
 }
 
 NodeList* findNodesByPath(const char* path) {
-    // ... (原有函数不变) ...
     char** pathParts = NULL;
     int pathLen = 0;
     char* pathCopy = strdup(path);
@@ -402,7 +395,6 @@ NodeList* findNodesByPath(const char* path) {
 }
 
 void OutHTML(const char* path) {
-    // ... (原有函数不变) ...
     NodeList* result = findNodesByPath(path);
     if(result->count == 0){
         printf("OutHTML: No elements found for path '%s'\n", path);
@@ -418,7 +410,6 @@ void OutHTML(const char* path) {
 }
 
 void extractTextRecursive(HtmlNode* node, char* buffer, int* bufferLen, int capacity){
-    // ... (原有函数不变) ...
     if(!node || *bufferLen >= capacity - 1) return;
 
     if(node->type == TEXT_NODE && node->textContent){
@@ -448,7 +439,6 @@ void extractTextRecursive(HtmlNode* node, char* buffer, int* bufferLen, int capa
 }
 
 void Text(const char* path){
-    // ... (原有函数不变) ...
      NodeList* result = findNodesByPath(path);
      if(result->count == 0){
         printf("Text: No elements found for path '%s'\n", path);
@@ -473,7 +463,6 @@ void Text(const char* path){
 
 // 一些辅助声明函数
 int isVoidElement(const char* tag) {
-    // ... (原有函数不变) ...
     const char* voidTags[] = {
         "area", "base", "br", "col", "embed", "hr", "img", "input",
         "link", "meta", "param", "source", "track", "wbr", NULL
@@ -485,7 +474,6 @@ int isVoidElement(const char* tag) {
 }
 
 int isBlockTag(const char* tag) {
-    // ... (原有函数不变) ...
     const char* blockTags[] = {
         "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "div", 
         "table", "tr", "form", "body", "html", NULL
