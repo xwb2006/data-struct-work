@@ -126,21 +126,26 @@ int main(int argc, char* argv[]) {
 //--------------------------------------------------------------------
 
 void buildDOM() {
+    // 初始化根节点
     G_rootNode = createNode(ELEMENT_NODE);
     G_rootNode->tagName = strdup("document_root");
 
+    // 创建栈用于管理标签层级，根节点入栈
     Stack* stack = createStack(256);
     push(stack, G_rootNode);
 
-    char* ptr = G_htmlContent;
+    char* ptr = G_htmlContent; // 指向HTML内容的指针
 
+    // 遍历HTML内容
     while (*ptr) {
         char* start = ptr;
         
+        // 提取标签外的文本内容
         while (*ptr && *ptr != '<') {
             ptr++;
         }
 
+        // 处理文本节点（非空白文本才添加）
         if (ptr > start) {
             char* text = strndup_custom(start, ptr - start);
             if (!isWhitespace(text)) {
@@ -152,11 +157,12 @@ void buildDOM() {
             }
         }
         
-        if (*ptr == '\0') break;
+        if (*ptr == '\0') break; // 内容结束则退出
 
-        int tagStartPos = ptr - G_htmlContent;
+        int tagStartPos = ptr - G_htmlContent; // 记录标签起始位置
         ptr++;
 
+        // 处理注释标签（<!-- ... -->）
         if (*ptr == '!') {
             if (strncmp(ptr, "!--", 3) == 0) {
                 ptr = strstr(ptr, "-->");
@@ -168,10 +174,11 @@ void buildDOM() {
             continue;
         }
 
+        // 处理闭合标签（</tag>）
         if (*ptr == '/') {
             ptr++;
             char* tagNameStart = ptr;
-            while (*ptr && *ptr != '>') ptr++;
+            while (*ptr && *ptr != '>') ptr++; // 提取标签名
             
             char tempTag[100];
             size_t tagLen = ptr - tagNameStart;
@@ -180,6 +187,7 @@ void buildDOM() {
             tempTag[tagLen] = '\0';
             toLowerStr(tempTag);
             
+            // 检查标签匹配
             HtmlNode* topNode = peek(stack);
             if (topNode && topNode->tagName && strcmp(tempTag, topNode->tagName) == 0) {
                 pop(stack)->endPos = (ptr - G_htmlContent) + 1;
@@ -193,8 +201,10 @@ void buildDOM() {
             }
             if (*ptr == '>') ptr++;
         } 
+        // 处理开始标签（<tag>）
         else {
             char* tagNameStart = ptr;
+            // 提取标签名（遇到空格、>、/停止）
             while (*ptr && !isspace((unsigned char)*ptr) && *ptr != '>' && *ptr != '/') {
                 ptr++;
             }
@@ -206,6 +216,7 @@ void buildDOM() {
             tagName[tagLen] = '\0';
             toLowerStr(tagName);
             
+            // 特殊处理script和style标签（直接找闭合标签）
             if (strcmp(tagName, "script") == 0 || strcmp(tagName, "style") == 0) {
                  char endTag[110];
                  sprintf(endTag, "</%s>", tagName);
@@ -214,22 +225,21 @@ void buildDOM() {
                  continue;
             }
             
-            // --- START: CORRECTED SELF-CLOSING TAG LOGIC ---
+            // 判断自闭合标签（/>结尾）
             char* tagEnd = ptr;
             while (*tagEnd && *tagEnd != '>') {
                 tagEnd++;
             }
 
             int isSelfClosing = 0;
-            // A tag is self-closing if a '/' exists right before the '>'
             if (tagEnd > ptr && *(tagEnd - 1) == '/') {
                 isSelfClosing = 1;
             }
             
-            ptr = tagEnd; // Move pointer to the '>'
-            if (*ptr == '>') ptr++; // And then move past it
-            // --- END: CORRECTED SELF-CLOSING TAG LOGIC ---
+            ptr = tagEnd;
+            if (*ptr == '>') ptr++;
 
+            // 创建元素节点并添加到父节点
             HtmlNode* newNode = createNode(ELEMENT_NODE);
             newNode->tagName = strdup(tagName);
             newNode->startPos = tagStartPos;
@@ -237,18 +247,20 @@ void buildDOM() {
             
             addChild(peek(stack), newNode);
             
+            // 非自闭合且非空元素入栈（继续处理子节点）
             if (!isSelfClosing && !isVoidElement(newNode->tagName)) {
                 push(stack, newNode);
             }
         }
     }
 
+    // 检查未闭合标签
     if (stack->top > 0) {
         printf("CheckHTML Error: Unclosed tag <%s>\n", peek(stack)->tagName);
         G_parsingError = 1;
     }
     
-    freeStack(stack);
+    freeStack(stack); // 释放栈资源
 }
 
 void CheckHTML() {
