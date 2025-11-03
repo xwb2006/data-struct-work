@@ -3,9 +3,7 @@
 #include <string.h>
 #include <ctype.h>
 
-//--------------------------------------------------------------------
-// 1. Data Structure Definitions
-//--------------------------------------------------------------------
+// 定义储存结构
 
 typedef enum { ELEMENT_NODE, TEXT_NODE } NodeType;
 
@@ -32,16 +30,12 @@ typedef struct {
     int count;
 } NodeList;
 
-//--------------------------------------------------------------------
-// 2. Global Variables
-//--------------------------------------------------------------------
-char* G_htmlContent = NULL;
+// 全局变量
+char* G_htmlContent = NULL;  // 内容
 HtmlNode* G_rootNode = NULL;
-int G_parsingError = 0;
+int G_parsingError = 0; // 标记是否有问题
 
-//--------------------------------------------------------------------
-// 3. Function Prototypes
-//--------------------------------------------------------------------
+//函数
 void CheckHTML();
 void OutHTML(const char* path);
 void Text(const char* path);
@@ -60,9 +54,6 @@ HtmlNode* pop(Stack* s);
 HtmlNode* peek(Stack* s);
 void freeStack(Stack* s);
 
-//--------------------------------------------------------------------
-// 4. Main Function
-//--------------------------------------------------------------------
 int main(int argc, char* argv[]) {
     if (argc != 2) {
         printf("Usage: %s <filename.html>\n", argv[0]);
@@ -121,10 +112,7 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
-//--------------------------------------------------------------------
-// 5. Core Function Implementations
-//--------------------------------------------------------------------
-
+// 具体实现
 void buildDOM() {
     // 初始化根节点
     G_rootNode = createNode(ELEMENT_NODE);
@@ -381,10 +369,7 @@ void Text(const char* path){
     free(result);
 }
 
-//--------------------------------------------------------------------
-// 6. Utility & DS Implementations
-//--------------------------------------------------------------------
-
+// 一些辅助声明函数
 int isVoidElement(const char* tag) {
     const char* voidTags[] = {
         "area", "base", "br", "col", "embed", "hr", "img", "input",
