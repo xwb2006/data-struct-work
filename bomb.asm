@@ -388,12 +388,12 @@ Disassembly of section .text:
     1549:	64 48 8b 04 25 28 00 	mov    %fs:0x28,%rax
     1550:	00 00 
     1552:	48 89 44 24 08       	mov    %rax,0x8(%rsp)
-    1557:	31 c0                	xor    %eax,%eax
-    1559:	48 8d 4c 24 04       	lea    0x4(%rsp),%rcx
-    155e:	48 89 e2             	mov    %rsp,%rdx
-    1561:	48 8d 35 6f 20 00 00 	lea    0x206f(%rip),%rsi        # 35d7 <array.0+0x397>
+    1557:	31 c0                	xor    %eax,%eax            # eax=0
+    1559:	48 8d 4c 24 04       	lea    0x4(%rsp),%rcx       # rcx=rsp+4
+    155e:	48 89 e2             	mov    %rsp,%rdx        # rdx=rsp
+    1561:	48 8d 35 6f 20 00 00 	lea    0x206f(%rip),%rsi        # 35d7 <array.0+0x397>  rsi=array
     1568:	e8 e3 fb ff ff       	call   1150 <__isoc99_sscanf@plt>
-    156d:	83 f8 01             	cmp    $0x1,%eax
+    156d:	83 f8 01             	cmp    $0x1,%eax        # check if one input num,
     1570:	7e 07                	jle    1579 <phase_3+0x35>
     1572:	83 7c 24 04 00       	cmpl   $0x0,0x4(%rsp)
     1577:	78 05                	js     157e <phase_3+0x3a>
@@ -572,9 +572,9 @@ Disassembly of section .text:
     17b4:	64 48 8b 04 25 28 00 	mov    %fs:0x28,%rax
     17bb:	00 00 
     17bd:	48 89 44 24 08       	mov    %rax,0x8(%rsp)
-    17c2:	31 c0                	xor    %eax,%eax
-    17c4:	48 8d 4c 24 04       	lea    0x4(%rsp),%rcx
-    17c9:	48 89 e2             	mov    %rsp,%rdx
+    17c2:	31 c0                	xor    %eax,%eax    # eax = 0
+    17c4:	48 8d 4c 24 04       	lea    0x4(%rsp),%rcx   
+    17c9:	48 89 e2             	mov    %rsp,%rdx    # 
     17cc:	48 8d 35 04 1e 00 00 	lea    0x1e04(%rip),%rsi        # 35d7 <array.0+0x397>
     17d3:	e8 78 f9 ff ff       	call   1150 <__isoc99_sscanf@plt>
     17d8:	83 f8 01             	cmp    $0x1,%eax

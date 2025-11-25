@@ -485,7 +485,6 @@ int isBlockTag(const char* tag) {
 }
 
 char* strndup_custom(const char* s, size_t n) {
-    // ... (原有函数不变) ...
     char* p = (char*)malloc(n + 1);
     if (p) {
         strncpy(p, s, n);
@@ -495,12 +494,10 @@ char* strndup_custom(const char* s, size_t n) {
 }
 
 void toLowerStr(char* str) {
-    // ... (原有函数不变) ...
     for (; *str; ++str) *str = tolower((unsigned char)*str);
 }
 
 int isWhitespace(const char* str) {
-    // ... (原有函数不变) ...
     while (*str) {
         if (!isspace((unsigned char)*str)) return 0;
         str++;
@@ -509,14 +506,12 @@ int isWhitespace(const char* str) {
 }
 
 HtmlNode* createNode(NodeType type) {
-    // ... (原有函数不变) ...
     HtmlNode* node = (HtmlNode*)calloc(1, sizeof(HtmlNode));
     node->type = type;
     return node;
 }
 
 void addChild(HtmlNode* parent, HtmlNode* child) {
-    // ... (原有函数不变) ...
     if (parent->childCount >= parent->capacity) {
         parent->capacity = (parent->capacity == 0) ? 8 : parent->capacity * 2;
         parent->children = (HtmlNode**)realloc(parent->children, sizeof(HtmlNode*) * parent->capacity);
@@ -526,7 +521,6 @@ void addChild(HtmlNode* parent, HtmlNode* child) {
 }
 
 void freeTree(HtmlNode* node) {
-    // ... (原有函数不变) ...
     if (!node) return;
     for (int i = 0; i < node->childCount; ++i) {
         freeTree(node->children[i]);
@@ -538,7 +532,6 @@ void freeTree(HtmlNode* node) {
 }
 
 Stack* createStack(int capacity) {
-    // ... (原有函数不变) ...
     Stack* s = (Stack*)malloc(sizeof(Stack));
     s->items = (HtmlNode**)malloc(sizeof(HtmlNode*) * capacity);
     s->top = -1;
@@ -547,14 +540,12 @@ Stack* createStack(int capacity) {
 }
 
 void push(Stack* s, HtmlNode* node) {
-    // ... (原有函数不变) ...
     if (s->top < s->capacity - 1) {
         s->items[++s->top] = node;
     }
 }
 
 HtmlNode* pop(Stack* s) {
-    // ... (原有函数不变) ...
     if (s->top > -1) {
         return s->items[s->top--];
     }
@@ -563,7 +554,6 @@ HtmlNode* pop(Stack* s) {
 
 HtmlNode* peek(Stack* s) 
 {
-    // ... (原有函数不变) ...
     if (s->top > -1) 
     {
         return s->items[s->top];
@@ -573,7 +563,6 @@ HtmlNode* peek(Stack* s)
 
 void freeStack(Stack* s) 
 {
-    // ... (原有函数不变) ...
     free(s->items);
     free(s);
 }
