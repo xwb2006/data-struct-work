@@ -4,22 +4,22 @@
 #include <ctype.h>
 #include <curl/curl.h>
 
-// --- Definitions & Structs ---
-
+// 定义节点类型
 typedef enum { ELEMENT_NODE, TEXT_NODE } NodeType;
 
-// Attribute structure for id, class, href, etc.
+// 内容属性
 typedef struct Attribute {
     char* key;
     char* value;
     struct Attribute* next;
 } Attribute;
 
+// 单个节点
 typedef struct HtmlNode {
     NodeType type;
     char* tagName;
     char* textContent;
-    Attribute* attributes; // Linked list of attributes
+    Attribute* attributes;
     struct HtmlNode* parent;
     struct HtmlNode** children;
     int childCount;
@@ -39,18 +39,17 @@ typedef struct {
     int count;
 } NodeList;
 
+// 结果输出调用
 typedef struct {
     char* buffer;
     size_t size;
 } MemoryStruct;
 
-// --- Global Variables ---
+// 全局变量
 char* G_htmlContent = NULL;
 HtmlNode* G_rootNode = NULL;
-NodeList* G_lastResult = NULL; // Stores the result of the last query for "Out[k]" access
+NodeList* G_lastResult = NULL; // 储存last query，方便后续使用索引
 int G_parsingError = 0;
-
-// --- Function Declarations ---
 
 // Core DOM
 void buildDOM();
@@ -142,36 +141,60 @@ int main(int argc, char* argv[]) {
         }
         else if (strncmp(command, "Out[", 4) == 0) {
             int index;
-            char prop[50];
-            // Parse: Out[k].property
-            char* ptr = command + 4;
-            if (sscanf(ptr, "%d].%s", &index, prop) == 2) {
+            char buffer[256]; // 用于暂存属性名或子选择器
+
+            // 情况 1: 处理 Out[k].query(selector)
+            // 注意 format 字符串：Out[%d].query(%[^)]) 意思是匹配 "Out[数字].query(字符串内容)"
+            if (sscanf(command, "Out[%d].query(%[^)])", &index, buffer) == 2) {
+                if (!G_lastResult || index < 0 || index >= G_lastResult->count) {
+                    printf("Error: Index %d out of bounds (Count: %d)\n", index, G_lastResult ? G_lastResult->count : 0);
+                } else {
+                    // 1. 获取第 k 个节点作为新的根
+                    HtmlNode* subRoot = G_lastResult->nodes[index];
+                    printf(">> Querying inside node <%s> with selector: %s\n", subRoot->tagName, buffer);
+
+                    // 2. 执行新的查询
+                    NodeList* newResult = querySelectorAll(subRoot, buffer);
+
+                    // 3. 释放旧的查询结果列表（注意：只释放列表容器，不释放节点本身，因为节点属于 DOM 树）
+                    if (G_lastResult) {
+                        free(G_lastResult->nodes);
+                        free(G_lastResult);
+                    }
+
+                    // 4. 更新全局结果并打印
+                    G_lastResult = newResult;
+                    printNodeList(G_lastResult);
+                }
+            }
+            // 情况 2: 处理 Out[k].property (如 innerText, outerHTML, href)
+            else if (sscanf(command, "Out[%d].%s", &index, buffer) == 2) {
                 if (!G_lastResult || index < 0 || index >= G_lastResult->count) {
                     printf("Error: Index %d out of bounds (Count: %d)\n", index, G_lastResult ? G_lastResult->count : 0);
                 } else {
                     HtmlNode* node = G_lastResult->nodes[index];
-                    if (strcmp(prop, "innerText") == 0) {
+                    if (strcmp(buffer, "innerText") == 0) {
                         char* text = getInnerText(node);
                         printf("%s\n", text);
                         free(text);
-                    } else if (strcmp(prop, "outerHTML") == 0) {
+                    } else if (strcmp(buffer, "outerHTML") == 0) {
                         char* html = getOuterHTML(node);
                         printf("%s\n", html);
                         free(html);
-                    } else if (strcmp(prop, "href") == 0) {
+                    } else if (strcmp(buffer, "href") == 0) {
                         char* href = getAttribute(node, "href");
                         printf("%s\n", href ? href : "(null)");
-                    } else if (strcmp(prop, "tagName") == 0) {
+                    } else if (strcmp(buffer, "tagName") == 0) {
                         printf("%s\n", node->tagName);
                     } else {
-                        printf("Unknown property: %s\n", prop);
+                        printf("Unknown property: %s\n", buffer);
                     }
                 }
             } else {
-                printf("Invalid format. Use Out[k].property\n");
+                printf("Invalid format. Usage: Out[k].query(selector) or Out[k].property\n");
             }
         } else {
-            printf("Unknown command.\n");
+            printf("Unknown command: %s\n", command);
         }
     }
 
@@ -263,7 +286,30 @@ void buildDOM() {
             if (topNode && topNode->tagName && strcmp(tagName, topNode->tagName) == 0) {
                 pop(stack)->endPos = (ptr - G_htmlContent) + 1;
             } else {
-                // Simplified mismatch handling: just ignore or close implictly
+                // 栈顶不匹配，这里采取往下看看，如果匹配就认为是中间多余起始标签或缺少结束标签
+                int find = -1;
+                for(int i = stack->top; i>=0 && i>= stack->top-3; i--){
+                    // 这里限制最多往下搜索3次，以防崩溃
+                    if(strcmp(tagName, stack->items[i]->tagName)==0){
+                        find = i;
+                        break;
+                    }
+                }
+                if(find!=-1){
+                    while(stack->top >= find){
+                        HtmlNode* node = pop(stack);
+                        // 给这些被迫闭合的节点一个结束位置,防止包含的内容被忽略
+                        if (node->endPos == -1) node->endPos = ptr - G_htmlContent;
+                        // 如果是目标节点，正常设置位置
+                        if(strcmp(node->tagName,tagName)==0){
+                            node->endPos = (ptr - G_htmlContent) + 1;
+                        }
+                    }
+                    printf("Recovered from mismatched tag: closed up to %s\n", tagName);// 打印修复信息
+                }else {
+                // 还是没找到（比如多余的 </div>），那只能忽略这个闭合标签了
+                printf("Warning: Ignoring stray closing tag </%s>\n", tagName);
+                }
             }
             if (*ptr == '>') ptr++;
         } 
@@ -720,46 +766,57 @@ void printNodeList(NodeList* list) {
     printf("] (%d items)\n", list->count);
 }
 
-char* getInnerText(HtmlNode* node) {
-    if (!node) return strdup("");
-    
-    // Calculate size first
-    size_t size = 1;
-    Stack* s = createStack(50);
-    push(s, node);
-    // ... Actually recursion is easier for text extraction
-    // Let's use a simpler recursive approach with a growing buffer
-    
-    // Temporary: static buffer for simplicity (Assignment says "OutHTML/Text", can be large)
-    // Dynamic approach:
-    char* buf = calloc(1, 1);
-    size_t len = 0;
-    
-    // Internal recursive helper
-    void extract(HtmlNode* n) {
-        if(n->type == TEXT_NODE && n->textContent) {
-            size_t l = strlen(n->textContent);
-            buf = realloc(buf, len + l + 2);
-            strcpy(buf + len, n->textContent);
-            len += l;
-            buf[len] = ' '; // add space separator
-            buf[len+1] = 0;
-            len++;
-        } else if (n->type == ELEMENT_NODE) {
-            for(int i=0; i<n->childCount; i++) extract(n->children[i]);
-            if(isBlockTag(n->tagName)) {
-                buf = realloc(buf, len + 2);
-                buf[len] = '\n';
-                buf[len+1] = 0;
-                len++;
+// --- 辅助函数：定义在外部 ---
+// 注意：buf 需要传二级指针 (char**)，因为 realloc 可能会改变内存地址
+// len 需要传指针 (size_t*)，以便累加长度
+void extractTextRecursiveHelper(HtmlNode* n, char** buf, size_t* len) {
+    if (!n) return;
+
+    if (n->type == TEXT_NODE && n->textContent) {
+        size_t l = strlen(n->textContent);
+        // 重新分配内存：当前长度 + 新文本长度 + 空格/终结符
+        char* new_ptr = (char*)realloc(*buf, *len + l + 2);
+        if (!new_ptr) return; // 简单的错误检查
+        *buf = new_ptr;
+
+        strcpy(*buf + *len, n->textContent);
+        *len += l;
+        (*buf)[*len] = ' '; // 添加空格分隔
+        (*buf)[*len + 1] = 0;
+        (*len)++;
+    } 
+    else if (n->type == ELEMENT_NODE) {
+        for (int i = 0; i < n->childCount; i++) {
+            extractTextRecursiveHelper(n->children[i], buf, len);
+        }
+        // 如果是块级元素，添加换行
+        if (isBlockTag(n->tagName)) {
+            char* new_ptr = (char*)realloc(*buf, *len + 2);
+            if (new_ptr) {
+                *buf = new_ptr;
+                (*buf)[*len] = '\n';
+                (*buf)[*len + 1] = 0;
+                (*len)++;
             }
         }
     }
+}
+
+// --- 主函数 ---
+char* getInnerText(HtmlNode* node) {
+    if (!node) return strdup("");
     
-    if(node->type == ELEMENT_NODE) {
-       for(int i=0; i<node->childCount; i++) extract(node->children[i]);
+    // 初始化 buffer
+    char* buf = (char*)calloc(1, 1);
+    size_t len = 0;
+    
+    // 调用辅助函数，传入 buf 和 len 的地址
+    if (node->type == ELEMENT_NODE) {
+       for (int i = 0; i < node->childCount; i++) {
+           extractTextRecursiveHelper(node->children[i], &buf, &len);
+       }
     } else {
-        extract(node);
+        extractTextRecursiveHelper(node, &buf, &len);
     }
     
     return buf;
