@@ -89,7 +89,6 @@ HtmlNode* pop(Stack* s);
 HtmlNode* peek(Stack* s);
 void freeStack(Stack* s);
 
-// --- Main ---
 
 int main(int argc, char* argv[]) {
     if (argc != 2) {
@@ -112,14 +111,14 @@ int main(int argc, char* argv[]) {
     }
 
     buildDOM();
-    if(G_parsingError) printf("Warning: HTML parsing encountered errors, DOM may be incomplete.\n");
+    if(G_parsingError) printf("OOOOi: HTML 出了点问题, DOM 可能不完整了.\n");
 
-    printf("\nHTML Loaded. Enter commands.\n");
-    printf("Examples:\n");
-    printf("  query div.content     (CSS Selector search)\n");
-    printf("  Out[0].innerText      (Get text of 1st result)\n");
-    printf("  Out[0].outerHTML      (Get HTML of 1st result)\n");
-    printf("  Out[0].href           (Get href if <a> tag)\n");
+    printf("\nHTML 处理完毕. Enter commands.\n");
+    printf("\n");
+    printf("  query div.content     (CSS Selector)\n");
+    printf("  Out[0].innerText      (Get text)\n");
+    printf("  Out[0].outerHTML      (Get HTML)\n");
+    printf("  Out[0].href           (Get href)\n");
     printf("  Exit\n");
 
     char command[1024];
@@ -141,9 +140,9 @@ int main(int argc, char* argv[]) {
         }
         else if (strncmp(command, "Out[", 4) == 0) {
             int index;
-            char buffer[256]; // 用于暂存属性名或子选择器
+            char buffer[256]; // 暂存属性名或子选择器
 
-            // 情况 1: 处理 Out[k].query(selector)
+            // 1: 处理 Out[k].query(selector)
             // 注意 format 字符串：Out[%d].query(%[^)]) 意思是匹配 "Out[数字].query(字符串内容)"
             if (sscanf(command, "Out[%d].query(%[^)])", &index, buffer) == 2) {
                 if (!G_lastResult || index < 0 || index >= G_lastResult->count) {
@@ -166,7 +165,7 @@ int main(int argc, char* argv[]) {
                     G_lastResult = newResult;
                     printNodeList(G_lastResult);
                 }
-            }
+            }/////////////看到这里了
             // 情况 2: 处理 Out[k].property (如 innerText, outerHTML, href)
             else if (sscanf(command, "Out[%d].%s", &index, buffer) == 2) {
                 if (!G_lastResult || index < 0 || index >= G_lastResult->count) {
