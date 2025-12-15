@@ -397,6 +397,17 @@ void buildDOM() {
 // --- CSS Selector Engine ---
 
 // Check if a single node matches a "Simple Selector" (e.g., "div#myid.class1.class2")
+// --- CSS Selector Engine (Modified) ---
+
+// 辅助函数：判断 str 是否以 prefix 开头
+int strStartsWith(const char* str, const char* prefix) {
+    if (!str || !prefix) return 0;
+    size_t len_pre = strlen(prefix);
+    size_t len_str = strlen(str);
+    return len_str < len_pre ? 0 : strncmp(prefix, str, len_pre) == 0;
+}
+
+// 核心匹配函数
 int matchNode(HtmlNode* node, const char* simpleSelector) {
     if (node->type != ELEMENT_NODE) return 0;
     if (strcmp(simpleSelector, "*") == 0) return 1;
@@ -405,9 +416,10 @@ int matchNode(HtmlNode* node, const char* simpleSelector) {
     char* cur = sel;
     int match = 1;
     
-    // 1. Tag Name
+    // 1. Tag Name (标签名匹配)
     char* tokenEnd = cur;
-    while (*tokenEnd && *tokenEnd != '#' && *tokenEnd != '.') tokenEnd++;
+    // 修改点：增加了 '[' 作为分隔符检查
+    while (*tokenEnd && *tokenEnd != '#' && *tokenEnd != '.' && *tokenEnd != '[') tokenEnd++;
     
     if (tokenEnd > cur) {
         char tag[100];
@@ -419,12 +431,143 @@ int matchNode(HtmlNode* node, const char* simpleSelector) {
         cur = tokenEnd;
     }
 
-    // 2. ID and Classes
+    // 2. ID, Classes, and Attributes (ID, Class, 属性选择器)
     while (*cur && match) {
-        char type = *cur; // '#' or '.'
-        cur++;
+        char type = *cur; // '#', '.', or '['
+        
+        if (type == '[') {
+            // --- 处理属性选择器 (修复版) ---
+            cur++; // 跳过 '['
+            char* endBracket = strchr(cur, ']');
+            if (!endBracket) { match = 0; break; } // 语法错误：没有闭合
+            
+            // 提取括号内容
+            size_t contentLen = endBracket - cur;
+            char* attrExpr = (char*)malloc(contentLen + 1);
+            strncpy(attrExpr, cur, contentLen);
+            attrExpr[contentLen] = 0;
+            
+            // 查找操作符 (=, ~=, |=, ^=)
+            char* key = NULL;
+            char* val = NULL;
+            char op[3] = {0}; 
+            
+            char* eqPos = strchr(attrExpr, '=');
+            
+            if (!eqPos) {
+                // [attribute] 仅检查是否存在
+                key = strdup(attrExpr);
+                // 修复 1: 属性名忽略大小写并去空格
+                char* tempKey = trimWhitespace(key);
+                free(key); key = tempKey;
+                toLowerStr(key); 
+
+                char* nodeVal = getAttribute(node, key);
+                if (!nodeVal) match = 0;
+            } else {
+                // 解析操作符
+                char prev = (eqPos > attrExpr) ? *(eqPos - 1) : 0;
+                
+                if (prev == '~' || prev == '|' || prev == '^') {
+                    op[0] = prev; op[1] = '='; op[2] = 0;
+                    size_t keyLen = (eqPos - 1) - attrExpr;
+                    key = strndup_custom(attrExpr, keyLen);
+                } else {
+                    op[0] = '='; op[1] = 0;
+                    size_t keyLen = eqPos - attrExpr;
+                    key = strndup_custom(attrExpr, keyLen);
+                }
+
+                // 修复 2: 规范化 Key (去空格 + 转小写)
+                char* cleanKey = trimWhitespace(key);
+                free(key); key = cleanKey;
+                toLowerStr(key); 
+                
+                // 提取 value (智能处理引号和空格)
+                char* rawVal = eqPos + 1;
+                // 跳过等号后的空格 (例如 [att = val])
+                while(*rawVal && isspace((unsigned char)*rawVal)) rawVal++;
+
+                if (*rawVal == '"' || *rawVal == '\'') {
+                    char quote = *rawVal;
+                    rawVal++;
+                    char* quoteEnd = strrchr(rawVal, quote);
+                    if (quoteEnd) *quoteEnd = 0; 
+                    val = strdup(rawVal); // 引号内的内容保留原样
+                } else {
+                    val = strdup(rawVal);
+                    // 修复 3: 如果没引号，必须去掉末尾空格
+                    char* cleanVal = trimWhitespace(val);
+                    free(val); val = cleanVal;
+                }
+                
+                // 获取节点实际属性值
+                char* nodeVal = getAttribute(node, key);
+                
+                if (!nodeVal) {
+                    match = 0;
+                } else {
+                    // --- 核心匹配逻辑 ---
+                    
+                    // [attribute=value] 完全匹配
+                    if (strcmp(op, "=") == 0) {
+                        if (strcmp(nodeVal, val) != 0) match = 0;
+                    }
+                    // [attribute~=value] 包含单词 (修复: 增强分隔符)
+                    else if (strcmp(op, "~=") == 0) {
+                        // 如果 val 为空或包含空格，则必定不匹配
+                        if (val[0] == '\0' || strpbrk(val, " \t\n\r\f")) {
+                            match = 0;
+                        } else {
+                            char* tempNv = strdup(nodeVal);
+                            // 修复 4: 使用所有标准空白符分割 (\t, \n 等)
+                            char* p = strtok(tempNv, " \t\n\r\f");
+                            int found = 0;
+                            while(p) {
+                                if(strcmp(p, val) == 0) { found = 1; break; }
+                                p = strtok(NULL, " \t\n\r\f");
+                            }
+                            free(tempNv);
+                            if (!found) match = 0;
+                        }
+                    }
+                    // [attribute|=value] 开头匹配
+                    else if (strcmp(op, "|=") == 0) {
+                        size_t vLen = strlen(val);
+                        if (vLen == 0) {
+                            match = 0;
+                        } else {
+                            if (strcmp(nodeVal, val) == 0) {
+                                // 匹配
+                            } else if (strlen(nodeVal) > vLen && 
+                                     strncmp(nodeVal, val, vLen) == 0 && 
+                                     nodeVal[vLen] == '-') {
+                                // 匹配 "val-" 开头
+                            } else {
+                                match = 0;
+                            }
+                        }
+                    }
+                    // [attribute^=value] 前缀匹配
+                    else if (strcmp(op, "^=") == 0) {
+                        if (strlen(val) == 0 || !strStartsWith(nodeVal, val)) match = 0;
+                    }
+                }
+            }
+            
+            if(key) free(key);
+            if(val) free(val);
+            free(attrExpr);
+            
+            cur = endBracket + 1; 
+            continue;
+        }
+        
+        // --- 下面是原有的 ID 和 Class 处理逻辑 (稍微调整了 tokenEnd 查找) ---
+        cur++; // skip '#' or '.'
         tokenEnd = cur;
-        while (*tokenEnd && *tokenEnd != '#' && *tokenEnd != '.') tokenEnd++;
+        // 修改点：增加了 '['
+        while (*tokenEnd && *tokenEnd != '#' && *tokenEnd != '.' && *tokenEnd != '[') tokenEnd++;
         
         char val[100];
         size_t len = tokenEnd - cur;
@@ -439,7 +582,6 @@ int matchNode(HtmlNode* node, const char* simpleSelector) {
             if (!cls) {
                 match = 0;
             } else {
-                // Check if val is in cls (space delimited)
                 char* clsCopy = strdup(cls);
                 char* p = strtok(clsCopy, " ");
                 int found = 0;
@@ -515,90 +657,6 @@ NodeList* querySelectorAll(HtmlNode* root, const char* selector) {
     return result;
 }
 
-// This function processes a specific selector chain (e.g. "div > p")
-// It's a simplified recursive descent.
-void matchRecursive(HtmlNode* currentScope, char* selectorStr, NodeList* finalResult) {
-    // 1. Parse the immediate selector (head)
-    char* s = trimWhitespace(selectorStr);
-    if (!*s) return;
-
-    char head[100] = {0};
-    char combinator = 0; // 0 (descendant), '>', '+', '~'
-    char* rest = NULL;
-
-    // Scan for separator
-    char* ptr = s;
-    while (*ptr) {
-        if (*ptr == '>' || *ptr == '+' || *ptr == '~') {
-            combinator = *ptr;
-            strncpy(head, s, ptr - s);
-            rest = ptr + 1; // Skip combinator
-            break;
-        }
-        if (isspace((unsigned char)*ptr)) {
-            // Might be descendant combinator, OR just space before >,+,~
-            // Check next non-space char
-            char* next = ptr + 1; 
-            while (*next && isspace((unsigned char)*next)) next++;
-            if (*next == '>' || *next == '+' || *next == '~') {
-                combinator = *next;
-                strncpy(head, s, ptr - s);
-                rest = next + 1;
-                ptr = next; // Update ptr to break loop
-                break;
-            } else if (*next) {
-                combinator = ' '; // Descendant
-                strncpy(head, s, ptr - s);
-                rest = next;
-                break;
-            }
-        }
-        ptr++;
-    }
-    if (combinator == 0) {
-        strcpy(head, s); // Last part
-    }
-    
-    // Trim head
-    char* cleanHead = trimWhitespace(head);
-
-    // Find all nodes in currentScope that match cleanHead
-    // If combinator is ' ', find all descendants
-    // If combinator is '>', find children
-    // If combinator is '+', adjacent sibling
-    // If combinator is '~', general sibling
-    // BUT: The standard logic is: Find X matching Head. Then for each X, find Y matching Rest.
-    
-    // Collection of nodes matching 'head' relative to currentScope
-    NodeList candidates = {0, 0};
-    
-    if (currentScope == G_rootNode && strcmp(currentScope->tagName, "document_root") == 0) {
-        // Initial entry, search everywhere for Head
-         // Assuming starting combinator is always effectively "descendant" from root
-         // except root isn't an element.
-         for(int i=0; i<currentScope->childCount; i++) {
-             // Helper to traverse tree and match
-             // We need a helper to collect all nodes matching 'cleanHead' under 'currentScope'
-             // Since 'currentScope' is document root, we behave like Descendant
-            Stack* s = createStack(100);
-            push(s, currentScope->children[i]);
-            while(s->top > -1){
-                HtmlNode* n = pop(s);
-                if(matchNode(n, cleanHead)) addToResult(&candidates, n);
-                for(int k=n->childCount-1; k>=0; k--) push(s, n->children[k]);
-            }
-            freeStack(s);
-         }
-    } else {
-        // We are inside a chain. Context matters.
-        // Wait, the recursion should pass the CONTEXT type.
-        // To simplify: I will only implement "Find Matches" logic here.
-    }
-}
-
-// --- Simplified "Left-to-Right" Selector Implementation --- 
-// Because writing a full CSS parser in one file is massive, 
-// we implement the logic: Split by combinator, filter list.
 
 void filterNodes(NodeList* source, char combinator, char* selector, NodeList* dest) {
     char* sel = trimWhitespace(selector);
@@ -626,11 +684,28 @@ void filterNodes(NodeList* source, char combinator, char* selector, NodeList* de
         }
         else if (combinator == '+') { // Adjacent Sibling
             if (ctx->parent) {
-                for (int k = 0; k < ctx->parent->childCount - 1; k++) {
+                int foundSelf = 0;
+                for (int k = 0; k < ctx->parent->childCount; k++) {
                     if (ctx->parent->children[k] == ctx) {
-                        HtmlNode* next = ctx->parent->children[k+1];
-                        if (matchNode(next, sel)) addToResult(dest, next);
-                        break;
+                        foundSelf = 1;
+                        continue; // 找到自己，跳到下一个节点
+                    }
+                    
+                    if (foundSelf) {
+                        HtmlNode* next = ctx->parent->children[k];
+
+                        // --- 核心修复：跳过空白文本节点 ---
+                        if (next->type == TEXT_NODE) {
+                            // 仅跳过空白文本节点，继续检查下一个兄弟
+                            if (isWhitespace(next->textContent)) continue; 
+                            // 如果文本节点非空白（例如包含可见字符），则它仍然是干扰项，我们必须停止。
+                        }
+                        
+                        // 找到第一个非TEXT_NODE 或非空白的兄弟节点
+                        if (matchNode(next, sel)) {
+                            addToResult(dest, next);
+                        }
+                        break; // 无论是匹配成功还是遇到非目标元素，都只找紧邻的第一个，然后停止。
                     }
                 }
             }
@@ -641,7 +716,15 @@ void filterNodes(NodeList* source, char combinator, char* selector, NodeList* de
                 for (int k = 0; k < ctx->parent->childCount; k++) {
                     if (ctx->parent->children[k] == ctx) foundSelf = 1;
                     else if (foundSelf) {
-                        if (matchNode(ctx->parent->children[k], sel)) addToResult(dest, ctx->parent->children[k]);
+                        HtmlNode* sibling = ctx->parent->children[k];
+                        if (sibling->type == TEXT_NODE && isWhitespace(sibling->textContent)) {
+                            continue; // 跳过中间的空白文本节点
+                        }
+                        
+                        if (matchNode(sibling, sel)) {
+                            addToResult(dest, sibling);
+                        }
+                        // 如果这里不跳过非匹配元素，则可以继续
                     }
                 }
             }
@@ -654,91 +737,99 @@ void filterNodes(NodeList* source, char combinator, char* selector, NodeList* de
 }
 
 void queryRecursive(HtmlNode* root, const char* selector, NodeList* results) {
-    // 1. Tokenize Selector Chain: "div > p .cls" -> [("div", ' '), ("p", '>'), (".cls", ' ')]
-    // We cheat: We process one step, generate a list, pass list to next step.
-    
     char* sel = strdup(selector);
     
-    // Initial List: Contains just the Root
+    // 初始集合：仅包含根节点
     NodeList currentSet = {0};
-    // Special case: Root is a dummy document_root, so "descendant" of root is actually "child" of root logic roughly
-    // But let's seed with ROOT, and treat first combinator as ' ' (descendant)
-    currentSet.nodes = malloc(sizeof(HtmlNode*));
+    currentSet.nodes = (HtmlNode**)malloc(sizeof(HtmlNode*));
     currentSet.nodes[0] = root;
     currentSet.count = 1;
 
     char* ptr = sel;
-    char currentComb = ' '; 
+    char currentComb = ' '; // 默认第一层关系是后代（或者理解为从根开始搜）
     
     while(*ptr) {
-        // Extract next simple selector part
-        char token[100] = {0};
+        // --- 核心修复开始：智能分词 ---
+        char token[256] = {0}; // 扩大缓冲区防止溢出
         char nextComb = 0;
         char* start = ptr;
         
-        // Advance until combinator
+        int inBracket = 0; // 括号计数器
+        
+        // 扫描直到遇到“不在括号内”的组合器
         while (*ptr) {
-            if (*ptr == '>' || *ptr == '+' || *ptr == '~') {
-                nextComb = *ptr;
-                break;
-            }
-            // Check for space acting as combinator
-            if (isspace((unsigned char)*ptr)) {
-                // Peek ahead
-                char* temp = ptr + 1; 
-                while(*temp && isspace((unsigned char)*temp)) temp++;
-                if (*temp == '>' || *temp == '+' || *temp == '~') {
-                    // The space is just formatting for another combinator
-                    ptr = temp; // Let the loop catch the symbol next iteration
-                    continue; 
-                } else if (*temp) {
-                    // Implicit descendant combinator
-                    nextComb = ' ';
+            // 1. 维护括号状态
+            if (*ptr == '[') inBracket++;
+            else if (*ptr == ']') inBracket--;
+
+            // 2. 只有在括号外 (inBracket == 0) 才允许识别分隔符
+            if (inBracket == 0) {
+                if (*ptr == '>' || *ptr == '+' || *ptr == '~') {
+                    nextComb = *ptr;
                     break;
+                }
+                
+                // 检查空格是否作为组合器
+                if (isspace((unsigned char)*ptr)) {
+                    // 向前看：如果空格后面紧跟其他符号(>+~)，则该空格只是格式化，不是后代组合器
+                    char* temp = ptr + 1; 
+                    while(*temp && isspace((unsigned char)*temp)) temp++;
+                    
+                    if (*temp == '>' || *temp == '+' || *temp == '~') {
+                        // 让外层循环处理那个符号
+                        ptr = temp; 
+                        continue; 
+                    } else if (*temp) {
+                        // 空格后面是文字，说明这是一个后代组合器 (Descendant Combinator)
+                        nextComb = ' ';
+                        break;
+                    }
                 }
             }
             ptr++;
         }
+        // --- 核心修复结束 ---
         
-        // Copy token
+        // 复制 Token (例如 "div[title~=flower]")
         int len = ptr - start;
-        if(len > 99) len = 99;
+        if(len > 255) len = 255;
         strncpy(token, start, len);
+        token[len] = 0; // 确保结尾
+        
         char* cleanToken = trimWhitespace(token);
         
-        // Perform filtering
+        // 执行过滤
         NodeList nextSet = {0};
         if (strlen(cleanToken) > 0) {
             filterNodes(&currentSet, currentComb, cleanToken, &nextSet);
-            // Swap sets
+            
+            // 释放旧集合，切换到新集合
             free(currentSet.nodes);
             currentSet = nextSet;
-        } else {
-             // Empty token (e.g. multiple spaces), ignore
-        }
+        } 
         free(cleanToken);
 
-        if (*ptr == 0) break; // End of string
+        if (*ptr == 0) break; // 字符串结束
 
-        // Setup for next loop
+        // 为下一次循环准备 Combinator
         if (nextComb != ' ') {
             currentComb = nextComb;
-            ptr++; // Skip the symbol
+            ptr++; // 跳过符号 (> + ~)
+            while (*ptr && isspace((unsigned char)*ptr)) ptr++; // 跳过符号后的空格
         } else {
             currentComb = ' ';
-            // Skip the space we found
-            while(isspace((unsigned char)*ptr)) ptr++;
+            // 跳过刚才作为组合器的空格
+            while(*ptr && isspace((unsigned char)*ptr)) ptr++;
         }
     }
 
-    // Add final currentSet to results
+    // 将最终结果加入 results
     for(int i=0; i<currentSet.count; i++) {
         addToResult(results, currentSet.nodes[i]);
     }
-    free(currentSet.nodes);
+    if(currentSet.nodes) free(currentSet.nodes);
     free(sel);
 }
-
 // --- Output Functions ---
 
 void printNodeList(NodeList* list) {
